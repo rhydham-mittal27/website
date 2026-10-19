@@ -1,7 +1,7 @@
 // Hero film renderer, off the main thread (owns an OffscreenCanvas).
 //
 // Two layers, like adaptive video streaming:
-//  1. Instant layer: every frame at 1280px (WebP, ~9 MB total) is downloaded and
+//  1. Instant layer: every frame at a device-appropriate width (WebP) is downloaded and
 //     decoded up front, so scrubbing just draws a ready bitmap.
 //  2. 4K layer: the original 3832px frames (AVIF, ~22 MB) stream in behind it,
 //     nearest-to-the-viewer first. Frames around the current position are decoded
@@ -28,6 +28,7 @@ let ctx = null
 let target = { w: 0, h: 0, x: 0, y: 0 }
 let lowW = 1280
 let lowH = 0
+let mobile = false
 let current = 0
 let drawQueued = false
 let generation = 0
@@ -76,10 +77,10 @@ const nearest = (list) => {
 // ---- instant layer -------------------------------------------------------
 
 function pumpLow() {
-  while (loActive < LO_DECODES && loQueue.length) {
+  while (loActive < (mobile ? 2 : LO_DECODES) && loQueue.length) {
     const i = loQueue.splice(nearest(loQueue), 1)[0]
     loActive++
-    createImageBitmap(loBlobs[i], { resizeWidth: lowW, resizeHeight: lowH, resizeQuality: 'high' })
+    createImageBitmap(loBlobs[i], { resizeWidth: lowW, resizeHeight: lowH, resizeQuality: mobile ? 'medium' : 'high' })
       .then((bmp) => {
         low[i] = bmp
         loBlobs[i] = null // the decoded bitmap is all we need
@@ -113,12 +114,16 @@ function loadLow(order) {
       })
       .catch(one)
   }
-  for (let k = 0; k < LO_CONCURRENCY; k++) one()
+  for (let k = 0; k < (mobile ? 3 : LO_CONCURRENCY); k++) one()
 }
 
 // ---- 4K layer ------------------------------------------------------------
 
 function startHi() {
+  if (mobile) {
+    hiStarted = true
+    return
+  }
   hiStarted = true
   for (let k = 0; k < HI_CONCURRENCY; k++) fetchHi()
 }
@@ -214,6 +219,7 @@ onmessage = ({ data }) => {
     SRC_W = data.srcW
     SRC_H = data.srcH
     lowW = data.lowW
+    mobile = Boolean(data.mobile)
     lowH = Math.round((lowW * SRC_H) / SRC_W)
     const n = (i) => String(i + 1).padStart(4, '0')
     const lo = data.loDir || 'frames-lo', hi = data.hiDir || 'frames-4k', ext = data.hiExt || 'avif'

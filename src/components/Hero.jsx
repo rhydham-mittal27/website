@@ -32,9 +32,10 @@ const loadOrder = (() => {
   }
   return order
 })()
-// Instant layer: every frame pre-decoded at this width for scrubbing (all 219 stay
-// in memory: ~0.8 GB at 1280, ~0.45 GB at 960). The 4K layer streams in on top.
-const playbackWidth = () => (Math.min(innerWidth, innerHeight) < 700 || navigator.deviceMemory <= 4 ? 960 : 1280)
+// Mobile keeps a smaller decoded frame cache and skips the 4K enhancement layer.
+// This avoids promoting hundreds of large bitmaps on devices with limited memory.
+const isMobilePlayback = () => window.matchMedia('(max-width: 700px), (pointer: coarse)').matches
+const playbackWidth = () => (isMobilePlayback() ? 640 : Math.min(innerWidth, innerHeight) < 700 || navigator.deviceMemory <= 4 ? 960 : 1280)
 const READY_AFTER = Math.ceil(FRAME_COUNT / 16) // first coarse pass is enough to start; the rest streams in
 const CONCURRENCY = 6
 
@@ -99,7 +100,8 @@ export default function Hero({ ready, onProgress }) {
     canvas.className = 'hero__canvas'
     hostRef.current.appendChild(canvas)
     canvasRef.current = canvas
-    const dpr = () => Math.min(window.devicePixelRatio || 1, 2)
+    const mobile = isMobilePlayback()
+    const dpr = () => Math.min(window.devicePixelRatio || 1, mobile ? 1 : 2)
     const size = () => ({ cw: Math.round(canvas.clientWidth * dpr()), ch: Math.round(canvas.clientHeight * dpr()) })
     let cancelled = false
     let ro
@@ -112,7 +114,7 @@ export default function Hero({ ready, onProgress }) {
         if (data.type === 'decoded') onProgress(Math.min(1, data.count / READY_AFTER))
       }
       w.postMessage(
-        { type: 'init', canvas: off, frameCount: FRAME_COUNT, srcW: SRC_W, srcH: SRC_H, order: loadOrder, base: location.origin, lowW: playbackWidth(),
+        { type: 'init', canvas: off, frameCount: FRAME_COUNT, srcW: SRC_W, srcH: SRC_H, order: loadOrder, base: location.origin, lowW: playbackWidth(), mobile,
           loDir: FILM.loDir, hiDir: FILM.hiDir, hiExt: FILM.hiExt, ...size() },
         [off],
       )
@@ -150,9 +152,16 @@ export default function Hero({ ready, onProgress }) {
       const i = loadOrder[next++]
       const img = new Image()
       img.decoding = 'async'
-      img.onload = () => {
+      img.onload = async () => {
         if (cancelled) return
-        frames.current[i] = img
+        try {
+          frames.current[i] =
+            mobile && typeof createImageBitmap === 'function'
+              ? await createImageBitmap(img, { resizeWidth: 640, resizeHeight: Math.round((640 * SRC_H) / SRC_W), resizeQuality: 'medium' })
+              : img
+        } catch {
+          frames.current[i] = img
+        }
         loaded++
         onProgress(Math.min(1, loaded / READY_AFTER))
         requestDraw()
