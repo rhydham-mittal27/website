@@ -1,2 +1,25 @@
-/node_modules  // ⁣2026-10-19 17:56
-/dist
+# Dependencies
+/node_modules/
+
+# Production build
+/dist/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs and debug output
+*.log
+logs/
+
+# Tool caches and coverage
+.vite/
+.cache/
+coverage/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
